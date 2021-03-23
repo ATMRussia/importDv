@@ -8,6 +8,7 @@
     "MinimalMongodb": "git+https://git.ans.aero/Libs/MinimalMongodb.git",
     "PrepareWords": "git+https://git.ans.aero/Libs/PrepareWords.git",
     "fast-xml-parser": "^3.19.0",
+    "he": "^1.2.0",
     "mssql": "^6.3.1"
   },
   "license": "GPL-3.0-or-later",
