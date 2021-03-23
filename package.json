@@ -1,0 +1,21 @@
+{
+  "name": "importDv",
+  "description": "Import DocsVison database to Mongodb",
+  "scripts": {
+    "start": "node importDV.js"
+  },
+  "dependencies": {
+    "MinimalMongodb": "git+https://git.ans.aero/Libs/MinimalMongodb.git",
+    "mssql": "^6.3.1"
+  },
+  "license": "GPL-3.0-or-later",
+  "main": "importDv.js",
+  "keywords": [
+    "docs vision",
+    "mongodb",
+    "transfer",
+    "files"
+  ],
+  "author": "Aleksey Druzhinin",
+  "version": "1.0.0"
+}
