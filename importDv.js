@@ -8,7 +8,7 @@ const parser = require('fast-xml-parser');
 const he = require('he');
 const async = require('async');
 
-const options = {
+const xmlParseOptions = {
     attributeNamePrefix : "",
     attrNodeName: "attr", //default is 'false'
     textNodeName : "text",
@@ -24,7 +24,21 @@ const options = {
     arrayMode: false
 };
 
-(async function() {
+const LocaleId = 1;
+function alwaysArray(item) {
+  if (!item){
+    return [];
+  }else if (!(item instanceof Array)) {
+    return [item]
+  }else {
+    return item
+  }
+}
+
+module.exports = async function() {
+  sql.on('error', err => {
+    console.log('sql err:',err.toString());
+  });
   const pool = new sql.ConnectionPool(settings.srcDb);
   await pool.connect();
   console.log('pool ready')
@@ -38,26 +52,8 @@ const options = {
     bucketName: 'dvFiles'
   });
 
-  var CardTypes = { lastChange : (new Date()).getTime() };
-  try {
-    const CardTypes = JSON.parse(fs.readFileSync('CardTypes.json'))
-  }catch(e) { }
+  const CardTypes = {}; //empty cache
 
-  async function saveCardTypes(){
-    fs.writeFileSync('CardTypes.json', JSON.stringify(CardTypes, null, '  '));
-  }
-
-  function alwaysArray(item) {
-    if (!item){
-      return [];
-    }else if (!(item instanceof Array)) {
-      return [item]
-    }else {
-      return item
-    }
-  }
-
-  const LocaleId = 1;
   async function getCardType(CardTypeID){
     if (CardTypes[CardTypeID]) {
       //cache
@@ -65,7 +61,7 @@ const options = {
     }
     const cardType = (await getRows('dvsys_carddefs', 'CardTypeID', CardTypeID))[0]
     //if( parser.validate(cardType.XMLSchema) === true) { //optional (it'll return an object in case it's not valid)
-    const Schema = parser.parse(cardType.XMLSchema, options);
+    const Schema = parser.parse(cardType.XMLSchema, xmlParseOptions);
     delete cardType.XMLSchema;
     delete cardType.XSDSchema;
     delete cardType.Icon;
@@ -73,7 +69,7 @@ const options = {
     vfs = alwaysArray(Schema.CardDefinition?.VirtualFields?.VirtualField)
 
     vfs.forEach((field) => {
-      const vf = (parser.parse(he.decode(field.Data), options)).VirtualField;
+      const vf = (parser.parse(he.decode(field.Data), xmlParseOptions)).VirtualField;
       const tagCParts = vf.ComputedField?.ComputationParts || vf.ComputedField?.ComputationGroup?.ComputationParts
       let compParts = alwaysArray(tagCParts?.ComputationPart)
       compParts = compParts.filter(cpart => (cpart.DataItem && cpart.DataItem.attr.SectionAlias && cpart.DataItem.attr.Value))
@@ -134,9 +130,21 @@ const options = {
     }
     CardTypes.lastChange = (new Date()).getTime();
     CardTypes[CardTypeID] = cardType;
-    await saveCardTypes();
+    process.send({
+      cmd: 'broadcast',
+      type: 'setCardType',
+      CardTypeID: CardTypeID,
+      CardType: cardType
+    });
+    //await saveCardTypes();
     return cardType;
   }
+
+  process.on('message', (msg) => {
+    if (msg.type === 'setCardType') {
+      CardTypes[msg.CardTypeID] = msg.CardType
+    }
+  });
 
   function asyncSql(query, onDoc){
     return new Promise((resolve, reject) => {
@@ -399,14 +407,6 @@ const options = {
     }
   }
   await dvCardsCollection.createIndex({ 'ParentID':1 });
-  let lastCard = await dvCardsCollection.findOne({
-    ParentID: '00000000-0000-0000-0000-000000000000'
-  }, {
-    sort : { _id: -1 },
-    projection: { _id : 1}
-  });
-
-  console.log('lastCard is', lastCard);
 
   async function processRootCard(doc) {
     const CardDocs = [];
@@ -418,42 +418,48 @@ const options = {
     await saveCardDocs(CardDocs);
     return 'good';
   }
-  let jobs = [];
-  async function runJobs(){
-    if (jobs.length === 0) return;
-    const results = await async.parallel(jobs.map(job => processRootCard.bind(null,job)));
-    console.log(`job results:${results.join(', ')}`)
-    jobs = [];
-  }
 
-  let processed = 0;
-  do{
-    const ssql = `select TOP 20 dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+  const parallelJobs = (settings.parallel || 10)
+  async function getNextJob(lastCardI) {
+    //console.log('getNextJob', lastCardI)
+    let lastCard = lastCardI || ((await dvCardsCollection.find({
+      ParentID: '00000000-0000-0000-0000-000000000000'
+    }, {
+      sort : { _id: -1 },
+      projection: { _id : 1, Description: 1 },
+      limit: 1
+    }).toArray())[0]);
+
+    //console.log('lastCard is', lastCard);
+    const ssql = `select TOP ${parallelJobs} dvCards.ParentRowID as FolderRowId, instanceTbl.*\
     from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
     inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
     where dvCards.HardCardID is not NULL AND instanceTbl.ParentID like \'00000000-0000-0000-0000-000000000000\'\
     ${lastCard ? ('AND instanceTbl.InstanceID > cast(\'' + lastCard._id + '\' as uniqueidentifier)'):''}\
     order by instanceTbl.InstanceID asc`;
 
-    //--AND dvCards.ParentRowID = cast(\'BFED1042-8CAA-4F5E-86E9-A0CA96A5F72D\' as uniqueidentifier)\
-    console.log('ssql', ssql)
-    await asyncSql(ssql, async(doc) => {
-      jobs.push(doc);
-      lastCard = doc;
-      processed++;
-      if (jobs.length < (settings.parallel || 10)) {
-        return;
-      }
-
-      await runJobs();
+    const jobs = await sqlRows(ssql);
+    process.send({
+      cmd: 'setLastCard',
+      lastCard: jobs.length ? {
+        _id: jobs[jobs.length - 1].InstanceID,
+        Description: jobs[jobs.length - 1].Description
+      } : null
     });
-    await runJobs();
-  } while(processed)
+    const processed = jobs.length;
 
+    if (!jobs.length) {
+      process.exit(0)
+    }
+    const results = await async.parallel(jobs.map(job => processRootCard.bind(null,job)));
+
+    console.log(`job results:${results.join(', ')}`)
+
+    return processed;
+  }
+  return getNextJob;
 
 //"select * from dvsys_files where OwnerCardID = cast('sections.MainInfo.FileID' as uniqueidentifier)"
-
-
 
   // HardCardID ->
   /* {
@@ -520,15 +526,4 @@ const options = {
     console.log(`Done! rowsCnt:${rowsCnt}`)
   })*/
 
-})().then(() => {
-  console.log('app finish')
-  process.exit(0)
-}).catch((err) => {
-  console.log('app crushed with error')
-  console.log(err)
-  process.exit(1)
-});
-
-sql.on('error', err => {
-  console.log('sql err:',err.toString());
-});
+}
