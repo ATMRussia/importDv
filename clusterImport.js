@@ -18,7 +18,7 @@ if (cluster.isMaster) {
     if (stopAll) return;
     for (const idb in cluster.workers) {
       if (cluster.workers[idb].ready){
-        console.log(`=== Send getNextJob worker[${idb}] gt Timestamp:${lastCard && lastCard.CreationDateTime}===`)
+        //console.log(`=== Send getNextJob worker[${idb}] gt Timestamp:${lastCard && lastCard.CreationDateTime}===`)
         locked = true;
         cluster.workers[idb].ready = false;
         cluster.workers[idb].send({
@@ -48,7 +48,7 @@ if (cluster.isMaster) {
         stopAll = true;
         clearInterval(statisticInterval);
       }else if (msg.cmd === 'setLastCard') {
-        console.log(`=== Receive setLastCard worker[${id}] ===`, msg.lastCard)
+        //console.log(`=== Receive setLastCard worker[${id}] ===`, msg.lastCard)
         lastCard = msg.lastCard;
         locked = false;
         srchReadyWorker();

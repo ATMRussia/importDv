@@ -410,14 +410,11 @@ module.exports = async function() {
   await dvCardsCollection.createIndex({ 'ParentID':1 });
   await dvCardsCollection.createIndex({ 'CreationDateTime':1 });
 
-  async function processRootCard(doc) {
-    const CardDocs = [];
+  async function processRootCard(doc, CardDocs) {
     doc.InstanceIDs = [];
     await extendInstance(doc, `root:${doc.InstanceID}`, doc, CardDocs);
 
     console.log(`rDoc folder:${doc.strFolders} Description:${doc.Description} id:${doc._id}`); //ids:${CardDocs.map(a => a._id).join(', ')}`)
-
-    await saveCardDocs(CardDocs);
     return 'good';
   }
 
@@ -437,7 +434,7 @@ module.exports = async function() {
       lastCard.CreationDateTime = new Date(lastCard.CreationDateTime);
     }
 
-    console.log('lastCard is', lastCard);
+    //console.log('lastCard is', lastCard);
 
     const ssql = `select TOP ${parallelJobs} dvDates.CreationDateTime, dvCards.ParentRowID as FolderRowId, instanceTbl.*\
     from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
@@ -446,7 +443,7 @@ module.exports = async function() {
     where dvCards.HardCardID is not NULL AND instanceTbl.ParentID = @ID\
     ${lastCard ? ('AND dvDates.CreationDateTime >= @Vdate AND instanceTbl.InstanceID <> @ID1'):''}\
     order by dvDates.CreationDateTime asc`;
-    console.log(ssql);
+    //console.log(ssql);
     const jobs = await sqlRows(ssql, '00000000-0000-0000-0000-000000000000', lastCard ? lastCard.CreationDateTime : null, lastCard ? lastCard._id : null);
     process.send({
       cmd: 'setLastCard',
@@ -461,9 +458,11 @@ module.exports = async function() {
     if (!jobs.length) {
       process.exit(0)
     }
-    const results = await async.parallel(jobs.map(job => processRootCard.bind(null,job)));
+    const CardDocs = [];
+    const results = await async.parallel(jobs.map(job => processRootCard.bind(null, job, CardDocs)));
+    await saveCardDocs(CardDocs);
 
-    console.log(`job results:${results.join(', ')}`)
+    //console.log(`job results:${results.join(', ')}`)
 
     return processed;
   }
