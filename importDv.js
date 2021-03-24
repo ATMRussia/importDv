@@ -239,11 +239,24 @@ module.exports = async function() {
   async function getRows(table, idKey, id) {
     const req = pool.request();
     req.input('ID', sql.UniqueIdentifier, id);
-    const rows = (await req.query(`select * from dvdb.dbo.[${table}] WITH (NOLOCK) where [${idKey}] = @ID`)).recordset;
-    //for (var i in rows) {
-    //  await extendRefs(rows[i])
-    //}
-    return rows;
+
+    do {
+      try{
+        const rows = (await req.query(`select * from dvdb.dbo.[${table}] WITH (NOLOCK) where [${idKey}] = @ID`)).recordset;
+        return rows;
+      }catch(e){
+        if (e.code !== 'ETIMEOUT'){
+          throw e;
+        }else {
+          console.log('Timeout query, try again in 5 sec')
+          await timeout(5000)
+        }
+      }
+    } while ( true )
+  }
+
+  function timeout(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async function sqlRows(sqlT, id, Vdate, id1) {
@@ -251,8 +264,19 @@ module.exports = async function() {
     id && req.input('ID', sql.UniqueIdentifier, id);
     Vdate && req.input('Vdate', sql.DateTime, Vdate);
     id1 && req.input('ID1', sql.UniqueIdentifier, id1);
-    const rows = (await req.query(sqlT)).recordset;
-    return rows;
+    do {
+      try{
+        const rows = (await req.query(sqlT)).recordset;
+        return rows;
+      }catch(e){
+        if (e.code !== 'ETIMEOUT'){
+          throw e;
+        }else {
+          console.log('Timeout query, try again in 5 sec')
+          await timeout(5000)
+        }
+      }
+    }while ( true )
   }
 
   async function fillFolders(doc) {
