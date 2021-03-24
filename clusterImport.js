@@ -1,10 +1,11 @@
 const cluster = require('cluster');
 const importDv = require('./importDv.js')
+const settings = require('./settings.js');
 
 if (cluster.isMaster) {
 
   // Start workers and listen for messages containing notifyRequest
-  const numCPUs = require('os').cpus().length;
+  const numCPUs = settings.workers || require('os').cpus().length;
   for (let i = 0; i < numCPUs; i++) {
     cluster.fork();
   }
