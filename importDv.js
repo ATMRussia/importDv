@@ -246,10 +246,11 @@ module.exports = async function() {
     return rows;
   }
 
-  async function sqlRows(sqlT, id) {
+  async function sqlRows(sqlT, id, Vdate, id1) {
     const req = pool.request();
     id && req.input('ID', sql.UniqueIdentifier, id);
-    // console.log(sqlT)
+    Vdate && req.input('Vdate', sql.DateTime, Vdate);
+    id1 && req.input('ID1', sql.UniqueIdentifier, id1);
     const rows = (await req.query(sqlT)).recordset;
     return rows;
   }
@@ -407,6 +408,7 @@ module.exports = async function() {
     }
   }
   await dvCardsCollection.createIndex({ 'ParentID':1 });
+  await dvCardsCollection.createIndex({ 'CreationDateTime':1 });
 
   async function processRootCard(doc) {
     const CardDocs = [];
@@ -422,28 +424,36 @@ module.exports = async function() {
   const parallelJobs = (settings.parallel || 10)
   async function getNextJob(lastCardI) {
     //console.log('getNextJob', lastCardI)
+
     let lastCard = lastCardI || ((await dvCardsCollection.find({
       ParentID: '00000000-0000-0000-0000-000000000000'
     }, {
-      sort : { _id: -1 },
-      projection: { _id : 1, Description: 1 },
+      sort : { CreationDateTime: -1 },
+      projection: { _id : 1, Description: 1, CreationDateTime:1 },
       limit: 1
     }).toArray())[0]);
 
-    //console.log('lastCard is', lastCard);
-    const ssql = `select TOP ${parallelJobs} dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+    if (lastCard) {
+      lastCard.CreationDateTime = new Date(lastCard.CreationDateTime);
+    }
+
+    console.log('lastCard is', lastCard);
+
+    const ssql = `select TOP ${parallelJobs} dvDates.CreationDateTime, dvCards.ParentRowID as FolderRowId, instanceTbl.*\
     from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
     inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
-    where dvCards.HardCardID is not NULL AND instanceTbl.ParentID like \'00000000-0000-0000-0000-000000000000\'\
-    ${lastCard ? ('AND instanceTbl.InstanceID > cast(\'' + lastCard._id + '\' as uniqueidentifier)'):''}\
-    order by instanceTbl.InstanceID asc`;
-
-    const jobs = await sqlRows(ssql);
+    inner join dvdb.dbo.[dvsys_instances_date] dvDates WITH (NOLOCK) on instanceTbl.InstanceID = dvDates.InstanceID\
+    where dvCards.HardCardID is not NULL AND instanceTbl.ParentID = @ID\
+    ${lastCard ? ('AND dvDates.CreationDateTime >= @Vdate AND instanceTbl.InstanceID <> @ID1'):''}\
+    order by dvDates.CreationDateTime asc`;
+    console.log(ssql);
+    const jobs = await sqlRows(ssql, '00000000-0000-0000-0000-000000000000', lastCard ? lastCard.CreationDateTime : null, lastCard ? lastCard._id : null);
     process.send({
       cmd: 'setLastCard',
       lastCard: jobs.length ? {
         _id: jobs[jobs.length - 1].InstanceID,
-        Description: jobs[jobs.length - 1].Description
+        Description: jobs[jobs.length - 1].Description,
+        CreationDateTime: jobs[jobs.length - 1].CreationDateTime
       } : null
     });
     const processed = jobs.length;
