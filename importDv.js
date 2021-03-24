@@ -194,7 +194,13 @@ const options = {
   async function extendFields(fields, InstanceID) {
     const ret={}
     for (let field of fields){
-      ret[field.Name] = await sqlRows(field.sql, InstanceID)
+      try{
+        ret[field.Name] = await sqlRows(field.sql, InstanceID)
+      }catch(e){
+        console.log(`Error in request ${field.sql}`)
+        throw e;
+      }
+
       if (field?.aggregation?.Function === 'Count') {
         ret[field.Name] = ret[field.Name][0].cnt;
       }else if (field.oneField) {
