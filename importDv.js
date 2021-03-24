@@ -396,7 +396,7 @@ const options = {
   });
 
   console.log('lastCard is', lastCard);
-  const ssql = `select TOP 15 dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+  const ssql = `select dvCards.ParentRowID as FolderRowId, instanceTbl.*\
   from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
   inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
   where dvCards.HardCardID is not NULL AND instanceTbl.ParentID like \'00000000-0000-0000-0000-000000000000\'\
