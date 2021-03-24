@@ -6,6 +6,7 @@ const MinimalMongodb = require('MinimalMongodb');
 const PrepareWords = require('PrepareWords');
 const parser = require('fast-xml-parser');
 const he = require('he');
+const async = require('async');
 
 const options = {
     attributeNamePrefix : "",
@@ -61,7 +62,7 @@ const options = {
       //cache
       return CardTypes[CardTypeID];
     }
-    const cardType = CardTypes[CardTypeID] = (await getRows('dvsys_carddefs', 'CardTypeID', CardTypeID))[0]
+    const cardType = (await getRows('dvsys_carddefs', 'CardTypeID', CardTypeID))[0]
     //if( parser.validate(cardType.XMLSchema) === true) { //optional (it'll return an object in case it's not valid)
     const Schema = parser.parse(cardType.XMLSchema, options);
     delete cardType.XMLSchema;
@@ -88,7 +89,7 @@ const options = {
         fieldsStr = `count (${fieldsStr}) as cnt`
       }
 
-      let sqlQ = `select ${fieldsStr} from dvdb.dbo.[dvtable_{${vf.attr.SectionTypeID}}] as main`
+      let sqlQ = `select ${fieldsStr} from dvdb.dbo.[dvtable_{${vf.attr.SectionTypeID}}] main WITH (NOLOCK)`
       //console.log('sqlQ', sqlQ)
       //process.exit(3);
 
@@ -97,7 +98,7 @@ const options = {
         const tblName = jd.attr.TableName ?
           `dvdb.dbo.[${jd.attr.TableName}]`
           : `dvdb.dbo.[dvtable_{${jd.attr.SectionID}}]`;
-        sqlQ += ` \n inner join ${tblName} as ${jd.attr.Alias} on ${jd.attr.SourceAlias}.${jd.attr.SourceField} = ${jd.attr.Alias}.${jd.attr.DestField}`
+        sqlQ += ` \n inner join ${tblName} ${jd.attr.Alias} WITH (NOLOCK) on ${jd.attr.SourceAlias}.${jd.attr.SourceField} = ${jd.attr.Alias}.${jd.attr.DestField}`
       })
       sqlQ+= ' where main.InstanceID = @ID'
       cardType.fields.push({
@@ -129,6 +130,7 @@ const options = {
       sectionDef.columns = (await sqlRows(`select Alias,LinkType from dvdb.dbo.[dvsys_fielddefs] WITH (NOLOCK) where [SectionTypeID] = @ID`, sectionId));
     }
     CardTypes.lastChange = (new Date()).getTime();
+    CardTypes[CardTypeID] = cardType;
     await saveCardTypes();
     return cardType;
   }
@@ -210,26 +212,6 @@ const options = {
 
       ret[section.Alias] = rows.length === 1 ? rows[0] : rows;
 
-      /*[ 'RowID', 'ParentRowID' ].concat(section.columns.map(a => a.Alias)).forEach(Alias => {
-        if (rows.length===1) {
-          out[Alias] = rows[0]
-        }else if (rows.length) {
-          out[Alias] = []
-          rows.forEach(row => out[Alias].push(row[Alias]))
-        }else {
-          out[Alias] = null
-        }
-      })*/
-
-      /*if (parentOut && parentOut.RowID && out.ParentRowID && parentOut.RowID.length) {
-        out.linkNum = []
-        //console.log(`alias: ${section.Alias}`)
-        //console.log(parentOut)
-        out.ParentRowID.forEach((RowID) => {
-          out.linkNum.push(parentOut.RowID.indexOf(RowID))
-        })
-      }*/
-
       if (section.sections && section.sections.length) {
         ret[section.Alias+'_'] = await extendProps(section.sections, InstanceID)
       }
@@ -289,30 +271,6 @@ const options = {
     doc.strFolders = folders.map(a => a.Name).join('>')
   }
 
-  /*const refValsRows = (await pool.request().query(`select * from dvdb.dbo.[dvtable_{49AD5A2D-17EC-46E2-A49E-C58D0BBD9C1A}] WITH (NOLOCK)`)).recordset;
-  const refVals = {}
-  refValsRows.forEach((refRow) => {
-    refVals[refRow.RowID] = refRow
-  })
-
-  async function extendRefs(row, outKey = 'refs', propKey = 'Name') {
-    let outProps = row[outKey] || {};
-    row[outKey] = outProps
-
-    for (let key in row) {
-      if ( refVals[row[key]] ) {
-        outProps[key] = refVals[row[key]][propKey]
-      }
-    }
-  }*/
-
-  //await copyTableToMongo('dvdb.dbo.[dvtable_{8C77892A-21CC-4972-AD71-A9919BCA8187}]', 'dvDocs', 130000)
-  /*await copyTableToMongo('dvdb.dbo.[dvtable_{C78ABDED-DB1C-4217-AE0D-51A400546923}]', 'dvOrganizations')
-  await copyTableToMongo('dvdb.dbo.[dvtable_{DD20BF9B-90F8-4D9A-9553-5B5F17AD724E}]', 'dvFCP')
-  await copyTableToMongo('dvdb.dbo.[dvtable_{DBC8AE9D-C1D2-4D5E-978B-339D22B32482}]', 'dvUsers')
-  await copyTableToMongo('dvdb.dbo.[dvtable_{85D15F7A-DDEE-4484-9B41-57D09E0B1A9A}]', 'dvFolders')*/
-  //await copyTableToMongo('dvdb.dbo.[dvtable_{7473F07F-11ED-4762-9F1E-7FF10808DDD1}]', 'dvStruct')
-
   //await copyTableToMongo('dvdb.dbo.[dvtable_{FE27631D-EEEA-4E2E-A04C-D4351282FB55}]', 'dvFoldersTree', 'RowID', 0)
 
   async function asyncEndStream(stream, chunk) {
@@ -343,24 +301,24 @@ const options = {
     child.fields = await extendFields(cardType.fields, ID);
     //child.debug = { sections: cardType.sections };
     const childs = await sqlRows('select dvCards.ParentRowID as FolderRowId, instanceTbl.*\
-    from dvdb.dbo.[dvsys_instances] instanceTbl\
-    left join dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards on instanceTbl.InstanceID = dvCards.HardCardID\
+    from dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK)\
+    left join dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
     where instanceTbl.ParentID = @ID', ID);
-    child.path = `${path}>${ID}`;
+    child.path = path;
     for (let subChild of childs){
-      await extendInstance(subChild, `${path}>${ID}`, rootDoc, CardDocs);
+      await extendInstance(subChild, `${path}>${subChild.InstanceID}`, rootDoc, CardDocs);
     }
 
     child.rootCardId = rootDoc.InstanceID;
     child._id = child.InstanceID;
 
     if (child.sections.MainInfo.FileID) {
-      child.binaryFileInfo = (await sqlRows('select top 1 dvFiles.Name, dvFiles.BinaryID, ext1.version from dvdb.dbo.dvsys_files dvFiles\
-  inner join dvdb.dbo.[dvtable_{F831372E-8A76-4ABC-AF15-D86DC5FFBE12}] ext1 on ext1.FileID = dvFiles.FileID \
+      child.binaryFileInfo = (await sqlRows('select top 1 dvFiles.Name, dvFiles.BinaryID, ext1.version from dvdb.dbo.dvsys_files dvFiles WITH (NOLOCK)\
+  inner join dvdb.dbo.[dvtable_{F831372E-8A76-4ABC-AF15-D86DC5FFBE12}] ext1 WITH (NOLOCK) on ext1.FileID = dvFiles.FileID \
   where dvFiles.OwnerCardID = @ID\
   ORDER by ext1.version desc', child.sections.MainInfo.FileID))[0];
 
-      const ff=(await sqlRows(`select * from dvdb.dbo.dvsys_binaries where ID = @ID`, child.binaryFileInfo.BinaryID))[0];
+      const ff=(await sqlRows(`select * from dvdb.dbo.dvsys_binaries WITH (NOLOCK) where ID = @ID`, child.binaryFileInfo.BinaryID))[0];
       const binId = ff.ID;
       //delete ff.ID;
       const bindata = ff.Data || ff.StreamData;
@@ -406,21 +364,30 @@ const options = {
     CardDocs.push(child);
   } //extendInstance
 
-  var CardDocs = [];
-
-  async function saveCardDocs(){
-    await dvCardsCollection.insertMany(CardDocs);
-    CardDocs = [];
-    //while(CardDocs.length) {
-      //let doc = CardDocs.shift();
-      /*await dvCardsCollection.updateOne({
-        _id: doc._id
-      }, {
-        $set: doc
-      }, {
-        upsert: true
-      })*/
-    //}
+  async function saveCardDocs(CardDocs){
+    try{
+      await dvCardsCollection.insertMany(CardDocs);
+      console.log(`dvCards inserted cnt:${CardDocs.length}`);
+    }catch(e){
+      if (e.code !== 11000) {
+        throw e;
+      }
+      let updCnt = 0;
+      while(CardDocs.length) {
+        let doc = CardDocs.shift();
+        updCnt++;
+        await dvCardsCollection.updateOne({
+          _id: doc._id
+        }, {
+          $set: doc
+        }, {
+          upsert: true
+        });
+      }
+      console.log(`dvCards updated cnt:${updCnt}`);
+      //await dvCardsCollection.removeMany({ _id: {$in: CardDocs.map(a => a._id)} })
+      //await dvCardsCollection.insertMany(CardDocs);
+    }
   }
 
   const lastCard = await dvCardsCollection.findOne({}, {
@@ -429,26 +396,42 @@ const options = {
   });
 
   console.log('lastCard is', lastCard);
-  const ssql = `select dvCards.ParentRowID as FolderRowId, instanceTbl.*\
-  from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards\
-  inner join dvdb.dbo.[dvsys_instances] instanceTbl on instanceTbl.InstanceID = dvCards.HardCardID\
+  const ssql = `select TOP 15 dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+  from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
+  inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
   where dvCards.HardCardID is not NULL AND instanceTbl.ParentID like \'00000000-0000-0000-0000-000000000000\'\
-  --AND dvCards.ParentRowID = cast(\'BFED1042-8CAA-4F5E-86E9-A0CA96A5F72D\' as uniqueidentifier)\
-  ${lastCard ? ('AND instanceTbl.InstanceID > ' + lastCard._id):''}\
+  ${lastCard ? ('AND instanceTbl.InstanceID > cast(\'' + lastCard._id + '\' as uniqueidentifier)'):''}\
   order by instanceTbl.InstanceID asc`;
 
+  //--AND dvCards.ParentRowID = cast(\'BFED1042-8CAA-4F5E-86E9-A0CA96A5F72D\' as uniqueidentifier)\
   console.log('ssql', ssql)
-  await asyncSql(ssql, async(doc) => {
-    doc.InstanceIDs=[];
+  async function processRootCard(doc) {
+    const CardDocs = [];
+    doc.InstanceIDs = [];
     await extendInstance(doc, `root:${doc.InstanceID}`, doc, CardDocs);
 
-    console.log('folders', doc.strFolders)
-    console.log('doc', doc)
+    console.log(`rDoc folder:${doc.strFolders} Description:${doc.Description} id:${doc._id}`); //ids:${CardDocs.map(a => a._id).join(', ')}`)
 
-    console.log(`CardDocs.length: ${CardDocs.length}`)
-    await saveCardDocs();
-    console.log('dvCards inserted');
-  })
+    await saveCardDocs(CardDocs);
+    return 'good';
+  }
+  let jobs = [];
+  async function runJobs(){
+    if (jobs.length === 0) return;
+    const results = await async.parallel(jobs.map(job => processRootCard.bind(null,job)));
+    console.log(`job results:${results.join(', ')}`)
+    jobs = [];
+  }
+
+  await asyncSql(ssql, async(doc) => {
+    jobs.push(doc);
+    if (jobs.length < (settings.parallel || 10)) {
+      return;
+    }
+
+    await runJobs();
+  });
+  await runJobs();
 
 //"select * from dvsys_files where OwnerCardID = cast('sections.MainInfo.FileID' as uniqueidentifier)"
 
