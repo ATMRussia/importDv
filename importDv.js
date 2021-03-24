@@ -87,7 +87,9 @@ const options = {
       let fieldsStr = fields.length ? fields.join(', ') : '*';
 
       if (tagCParts?.Aggregation?.attr?.Function === 'Count') {
-        fieldsStr = `count (${fieldsStr}) as cnt`
+        const agrAttrs = tagCParts?.Aggregation?.attr;
+        const cntField = (agrAttrs.SectionAlias &&  agrAttrs.PrimaryKey) ? `${agrAttrs.SectionAlias}.${agrAttrs.PrimaryKey}` : fieldsStr
+        fieldsStr = `count (${cntField}) as cnt`
       }
 
       let sqlQ = `select ${fieldsStr} from dvdb.dbo.[dvtable_{${vf.attr.SectionTypeID}}] main WITH (NOLOCK)`
@@ -197,7 +199,7 @@ const options = {
       try{
         ret[field.Name] = await sqlRows(field.sql, InstanceID)
       }catch(e){
-        console.log(`Error in request ${field.sql}`)
+        console.log(`Error in request ${field.sql} ID:${InstanceID}`)
         throw e;
       }
 
