@@ -396,8 +396,10 @@ const options = {
       //await dvCardsCollection.insertMany(CardDocs);
     }
   }
-
-  let lastCard = await dvCardsCollection.findOne({}, {
+  await dvCardsCollection.createIndex({ 'ParentID':1 });
+  let lastCard = await dvCardsCollection.findOne({
+    ParentID: '00000000-0000-0000-0000-000000000000'
+  }, {
     sort : { _id: -1 },
     projection: { _id : 1}
   });
