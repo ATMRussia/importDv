@@ -25,7 +25,8 @@ const options = {
 };
 
 (async function() {
-  const pool = await sql.connect(settings.srcDb)
+  const pool = new sql.ConnectionPool(settings.srcDb);
+  await pool.connect();
   console.log('pool ready')
 
   const dbConnector=new MinimalMongodb(settings.dstDb);
@@ -390,21 +391,13 @@ const options = {
     }
   }
 
-  const lastCard = await dvCardsCollection.findOne({}, {
+  let lastCard = await dvCardsCollection.findOne({}, {
     sort : { _id: -1 },
     projection: { _id : 1}
   });
 
   console.log('lastCard is', lastCard);
-  const ssql = `select dvCards.ParentRowID as FolderRowId, instanceTbl.*\
-  from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
-  inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
-  where dvCards.HardCardID is not NULL AND instanceTbl.ParentID like \'00000000-0000-0000-0000-000000000000\'\
-  ${lastCard ? ('AND instanceTbl.InstanceID > cast(\'' + lastCard._id + '\' as uniqueidentifier)'):''}\
-  order by instanceTbl.InstanceID asc`;
 
-  //--AND dvCards.ParentRowID = cast(\'BFED1042-8CAA-4F5E-86E9-A0CA96A5F72D\' as uniqueidentifier)\
-  console.log('ssql', ssql)
   async function processRootCard(doc) {
     const CardDocs = [];
     doc.InstanceIDs = [];
@@ -423,15 +416,30 @@ const options = {
     jobs = [];
   }
 
-  await asyncSql(ssql, async(doc) => {
-    jobs.push(doc);
-    if (jobs.length < (settings.parallel || 10)) {
-      return;
-    }
+  let processed = 0;
+  do{
+    const ssql = `select TOP 20 dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+    from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
+    inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
+    where dvCards.HardCardID is not NULL AND instanceTbl.ParentID like \'00000000-0000-0000-0000-000000000000\'\
+    ${lastCard ? ('AND instanceTbl.InstanceID > cast(\'' + lastCard._id + '\' as uniqueidentifier)'):''}\
+    order by instanceTbl.InstanceID asc`;
 
+    //--AND dvCards.ParentRowID = cast(\'BFED1042-8CAA-4F5E-86E9-A0CA96A5F72D\' as uniqueidentifier)\
+    console.log('ssql', ssql)
+    await asyncSql(ssql, async(doc) => {
+      jobs.push(doc);
+      lastCard = doc;
+      processed++;
+      if (jobs.length < (settings.parallel || 10)) {
+        return;
+      }
+
+      await runJobs();
+    });
     await runJobs();
-  });
-  await runJobs();
+  } while(processed)
+
 
 //"select * from dvsys_files where OwnerCardID = cast('sections.MainInfo.FileID' as uniqueidentifier)"
 
