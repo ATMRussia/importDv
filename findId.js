@@ -2,8 +2,15 @@ const settings = require('./settings.js');
 const fs = require('fs');
 const path = require('path');
 const sql = require('mssql');
+const optimist = require('optimist');
 const MinimalMongodb = require('MinimalMongodb');
 const PrepareWords = require('PrepareWords');
+
+if (!optimist.argv.id) {
+  console.log('Find ID in database');
+  console.log('--id <GUID>');
+  process.exit(1);
+}
 
 (async function() {
   const pool = await sql.connect(settings.srcDb)
@@ -27,7 +34,7 @@ const PrepareWords = require('PrepareWords');
     //console.log(`try find in tbl:${column.TABLE_NAME} col:${column.COLUMN_NAME}`)
     // DA86FABF-4DD7-4A86-B6FF-C58C24D12DE2 InstanceID Информационный отдел
     // RowID BFED1042-8CAA-4F5E-86E9-A0CA96A5F72D Информационный отдел
-    const srch = 'C15C150A-3BE6-4EC6-8E95-86496F16E40A';
+    const srch = optimist.argv.id;
     const q = `select count(*) as cnt from dvdb.dbo.[${column.TABLE_NAME}] WITH (NOLOCK) where [${column.COLUMN_NAME}] = cast('${srch}' as uniqueidentifier)`;
     console.log(`q:${q}`)
     try {

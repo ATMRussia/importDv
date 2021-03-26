@@ -7,6 +7,7 @@ const PrepareWords = require('PrepareWords');
 const parser = require('fast-xml-parser');
 const he = require('he');
 const async = require('async');
+const optimist = require('optimist');
 
 const xmlParseOptions = {
     attributeNamePrefix : "",
@@ -130,7 +131,7 @@ module.exports = async function() {
     }
     CardTypes.lastChange = (new Date()).getTime();
     CardTypes[CardTypeID] = cardType;
-    process.send({
+    process.send && process.send({
       cmd: 'broadcast',
       type: 'setCardType',
       CardTypeID: CardTypeID,
@@ -161,46 +162,6 @@ module.exports = async function() {
     })
   }
 
-  function copyTableToMongo(table, mongoCollection, idKey = 'RowID', offset = 0, where = '', onDoc) {
-    return new Promise((resolve, reject) => {
-      const request = new sql.Request(pool);
-      request.stream = true // You can set streaming differently for each request
-      const q = `select * from ${table} WITH (NOLOCK) ${where} order by [${idKey}] asc Offset ${offset} Rows`;
-      console.log(q)
-      request.query(q)
-      let rowCnt = 0;
-      request.on('row', async (row) => {
-        rowCnt++;
-        request.pause();
-        //const oldDoc = await mdb.collection(mongoCollection).findOne({
-        //  _id: row[idKey]
-        //});
-
-        onDoc && await onDoc(row);
-
-        //(!oldDoc || !oldDoc.SysRowTimestamp || (Buffer.compare(Buffer.from(oldDoc.SysRowTimestamp), row.SysRowTimestamp) !== 0)) &&
-        await mdb.collection(mongoCollection).updateOne({
-          _id: row[idKey]
-        }, {
-          $set: row
-        }, {
-          upsert: true
-        })
-        request.resume();
-        (rowCnt % 100) === 0 && console.log(`copying rows table:${table} rows:${rowCnt}`);
-      })
-
-      request.on('error', err => {
-        reject(err)
-        console.log('err', err)
-      })
-
-      request.on('done', result => {
-        console.log(`copyTableToMongo ${table} to ${mongoCollection} completed rows:${rowCnt}`);
-        resolve();
-      })
-    })
-  }
   async function extendFields(fields, InstanceID) {
     const ret={}
     for (let field of fields){
@@ -312,8 +273,6 @@ module.exports = async function() {
     doc.folders = folders;
     doc.strFolders = folders.map(a => a.Name).join('>')
   }
-
-  //await copyTableToMongo('dvdb.dbo.[dvtable_{FE27631D-EEEA-4E2E-A04C-D4351282FB55}]', 'dvFoldersTree', 'RowID', 0)
 
   async function asyncEndStream(stream, chunk) {
     return new Promise((resolve, reject) => {
@@ -442,6 +401,15 @@ module.exports = async function() {
     return 'good';
   }
 
+  if (optimist.argv.search) {
+    return {
+      processRootCard,
+      saveCardDocs,
+      asyncSql,
+      mdb
+    }
+  }
+
   const parallelJobs = (settings.parallel || 10)
   async function getNextJob(lastCardI) {
     //console.log('getNextJob', lastCardI)
@@ -464,12 +432,12 @@ module.exports = async function() {
     from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
     inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
     inner join dvdb.dbo.[dvsys_instances_date] dvDates WITH (NOLOCK) on instanceTbl.InstanceID = dvDates.InstanceID\
-    where dvCards.HardCardID is not NULL AND instanceTbl.ParentID = @ID\
+    where instanceTbl.ParentID = @ID\
     ${lastCard ? ('AND dvDates.CreationDateTime >= @Vdate AND instanceTbl.InstanceID <> @ID1'):''}\
     order by dvDates.CreationDateTime asc`;
     //console.log(ssql);
     const jobs = await sqlRows(ssql, '00000000-0000-0000-0000-000000000000', lastCard ? lastCard.CreationDateTime : null, lastCard ? lastCard._id : null);
-    process.send({
+    process.send && process.send({
       cmd: 'setLastCard',
       lastCard: jobs.length ? {
         _id: jobs[jobs.length - 1].InstanceID,
@@ -518,45 +486,37 @@ module.exports = async function() {
 
   //lookup dvCards.ParentRowID -> dvFoldersTree.RowID
 
-  /*const request = new sql.Request(pool);
-  request.stream = true // You can set streaming differently for each request
-  request.query('SELECT main.* FROM dvdb.dbo.[dvtable_{8C77892A-21CC-4972-AD71-A9919BCA8187}] as main WITH (NOLOCK) order by CreationDate desc Offset 2000 rows')
+}
 
-  let rowsCnt = 0;
-  request.on('row', async (row) => {
-    rowsCnt++;
-    request.pause();
+optimist.argv.search && module.exports().then(async(functions) => {
+  const { processRootCard, saveCardDocs, asyncSql, mdb } = functions;
+  const ssql = `select dvDates.CreationDateTime, dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+  from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
+  inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
+  inner join dvdb.dbo.[dvsys_instances_date] dvDates WITH (NOLOCK) on instanceTbl.InstanceID = dvDates.InstanceID\
+  where instanceTbl.ParentID = cast(\'00000000-0000-0000-0000-000000000000\' as uniqueidentifier)`;
 
-    await extendRefs(row);
-    await extendProps('dvdb.dbo.[dvtable_{B822D7D1-2280-4B51-AE58-A1CF757C5672}]', row);
-    // await extendProps('dvdb.dbo.[dvtable_{B822D7D1-2280-4B51-AE58-A1CF757C5672}]', row);
-    //[dvtable_{B822D7D1-2280-4B51-AE58-A1CF757C5672}]
-    //console.log('doc', row)
-
-    const oldDoc = await dvCardsCollection.findOne({
-      _id: row.InstanceID
+  let cnt = 0;
+  console.log(ssql);
+  setInterval(()=> {
+    console.log(`Processed:${cnt}`)
+  }, 10000).unref()
+  await asyncSql(ssql, async (doc) => {
+    cnt++;
+    const adoc = await mdb.collection('dvCards').findOne({
+      _id: doc.InstanceID
+    }, {
+      projection: { _id:1 }
     });
 
-    (!oldDoc || (Buffer.compare(Buffer.from(oldDoc.SysRowTimestamp), row.SysRowTimestamp) !== 0)) &&
-    await dvCardsCollection.updateOne({
-      _id: row.InstanceID
-    }, {
-      $set: row
-    }, {
-      upsert: true
-    })
+    if (adoc) {
+      return
+    }
 
-    (rowsCnt % 100) === 0 && console.log(`copying dvCarts rows:${rowsCnt}`);
-
-    request.resume();
+    console.log('Missing card!', doc.InstanceID);
+    const Cards = [];
+    await processRootCard(doc, Cards);
+    await saveCardDocs(Cards);
   })
-
-  request.on('error', err => {
-    throw err;
-  })
-
-  request.on('done', result => {
-    console.log(`Done! rowsCnt:${rowsCnt}`)
-  })*/
-
-}
+  process.exit(0);
+})
