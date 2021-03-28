@@ -414,7 +414,6 @@ module.exports = async function() {
   async function getNextJob() {
     //console.log('getNextJob', lastCardI)
     const qResult = await mdb.collection('dvCardsQueued').findOneAndDelete({})
-    console.log('qResult', qResult)
     if (!qResult.value){
       console.log('dvCardsQueued empty. Quit.')
       return 0;
@@ -449,35 +448,21 @@ module.exports = async function() {
 
   return getNextJob;
 
-//"select * from dvsys_files where OwnerCardID = cast('sections.MainInfo.FileID' as uniqueidentifier)"
-
-  // HardCardID ->
-  /* {
-  dvsys_instances: { InstanceID: 1, ParentID: 6 }, -> карточка -> ParentID дочерние карточки (Нужно рекурсивно собрать)
+/*
   'dvtable_{F06A18E7-582E-4896-9C0C-146025E6D9DA}': { InstanceID: 1 }, --> ApprovalID ??
-  'dvtable_{B822D7D1-2280-4B51-AE58-A1CF757C5672}': { InstanceID: 58 }, --> props Нужно extendProps
   'dvtable_{55EF9765-2651-4F13-A716-4606B729881C}': { InstanceID: 1 }, -->SelectedValue ??
-  dvsys_links: { SourceCardID: 2, DestinationCardID: 15 },
   'dvtable_{47C41171-9C64-450A-A3A6-102B3156AD79}': { InstanceID: 2 }, --> Люди и их должность и положение в структуре
-  dvsys_log_application: { ResourceID: 6 },
-  'dvtable_{F65E5F15-F4F4-427E-8DFF-DED048EA6CA5}': { InstanceID: 6 }, --> ?? ValueName tags Значения из шаблона Мусор
-  'dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}': { HardCardID: 1 },
-  dvsys_instances_date: { InstanceID: 1 },
-  'dvtable_{3C2F1AC3-8D26-425F-956B-A3B0B52BAC5D}': { ParentCardID: 1 }, -> Фирма
-  dvsys_log: { ResourceID: 46, ParentID: 220, NewResourceID: 9 },
-  'dvtable_{ECA843EF-2810-4795-A81A-B047F76250EC}': { RefID: 12, RefCardID: 12 }, ->?
-  dvsys_instances_read: { InstanceID: 2 },
-  'dvtable_{8C77892A-21CC-4972-AD71-A9919BCA8187}': { InstanceID: 1 }, --> manyProps (есть фирма текстом)
-  'dvtable_{CD2746F7-2DBD-4D72-8F70-3B667B9409A7}': { Link: 1 },
-  'dvtable_{7A9F0D60-444E-41AF-845E-4F4E94F43A52}': { CardRefID: 1 } -?
-}*/
-
-
-  //lookup dvCards.ParentRowID -> dvFoldersTree.RowID
-
+*/
 }
 optimist.argv.singleJob && module.exports().then(() => {
-  console.log('Finish single job test')
+  console.log('Finish single job test');
+  process.exit(0);
+})
+
+optimist.argv.help && module.exports().then(() => {
+  console.log('--singleJob Process one card')
+  console.log('--search Create dvCardsQueued collection')
+  process.exit(0);
 })
 
 optimist.argv.search && module.exports().then(async(functions) => {
