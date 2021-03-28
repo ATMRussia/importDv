@@ -410,54 +410,43 @@ module.exports = async function() {
     }
   }
 
-  const parallelJobs = (settings.parallel || 10)
-  async function getNextJob(lastCardI) {
+  //const parallelJobs = (settings.parallel || 10)
+  async function getNextJob() {
     //console.log('getNextJob', lastCardI)
-
-    let lastCard = lastCardI || ((await dvCardsCollection.find({
-      ParentID: '00000000-0000-0000-0000-000000000000'
-    }, {
-      sort : { CreationDateTime: -1 },
-      projection: { _id : 1, Description: 1, CreationDateTime:1 },
-      limit: 1
-    }).toArray())[0]);
-
-    if (lastCard) {
-      lastCard.CreationDateTime = new Date(lastCard.CreationDateTime);
+    const qResult = await mdb.collection('dvCardsQueued').findOneAndDelete({})
+    console.log('qResult', qResult)
+    if (!qResult.value){
+      console.log('dvCardsQueued empty. Quit.')
+      return 0;
     }
 
-    //console.log('lastCard is', lastCard);
 
-    const ssql = `select TOP ${parallelJobs} dvDates.CreationDateTime, dvCards.ParentRowID as FolderRowId, instanceTbl.*\
+    const ssql = `select TOP 1 dvDates.CreationDateTime, dvCards.ParentRowID as FolderRowId, instanceTbl.*\
     from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\
     inner join dvdb.dbo.[dvsys_instances] instanceTbl WITH (NOLOCK) on instanceTbl.InstanceID = dvCards.HardCardID\
     inner join dvdb.dbo.[dvsys_instances_date] dvDates WITH (NOLOCK) on instanceTbl.InstanceID = dvDates.InstanceID\
-    where instanceTbl.ParentID = @ID\
-    ${lastCard ? ('AND dvDates.CreationDateTime >= @Vdate AND instanceTbl.InstanceID <> @ID1'):''}\
-    order by dvDates.CreationDateTime asc`;
+    where dvCards.HardCardID= @ID`;
     //console.log(ssql);
-    const jobs = await sqlRows(ssql, '00000000-0000-0000-0000-000000000000', lastCard ? lastCard.CreationDateTime : null, lastCard ? lastCard._id : null);
-    process.send && process.send({
-      cmd: 'setLastCard',
-      lastCard: jobs.length ? {
-        _id: jobs[jobs.length - 1].InstanceID,
-        Description: jobs[jobs.length - 1].Description,
-        CreationDateTime: jobs[jobs.length - 1].CreationDateTime
-      } : null
-    });
+    const jobs = await sqlRows(ssql, qResult.value._id);
+
     const processed = jobs.length;
 
     if (!jobs.length) {
       process.exit(0)
     }
+
     const CardDocs = [];
-    const results = await async.parallel(jobs.map(job => processRootCard.bind(null, job, CardDocs)));
+    await processRootCard(jobs[0], CardDocs);
     await saveCardDocs(CardDocs);
 
     //console.log(`job results:${results.join(', ')}`)
 
     return processed;
   }
+  if (optimist.argv.singleJob) {
+    await getNextJob();
+  }
+
   return getNextJob;
 
 //"select * from dvsys_files where OwnerCardID = cast('sections.MainInfo.FileID' as uniqueidentifier)"
@@ -487,6 +476,9 @@ module.exports = async function() {
   //lookup dvCards.ParentRowID -> dvFoldersTree.RowID
 
 }
+optimist.argv.singleJob && module.exports().then(() => {
+  console.log('Finish single job test')
+})
 
 optimist.argv.search && module.exports().then(async(functions) => {
   const { processRootCard, saveCardDocs, asyncSql, mdb } = functions;
@@ -514,9 +506,20 @@ optimist.argv.search && module.exports().then(async(functions) => {
     }
 
     console.log('Missing card!', doc.InstanceID);
-    const Cards = [];
-    await processRootCard(doc, Cards);
-    await saveCardDocs(Cards);
+
+    await mdb.collection('dvCardsQueued').updateOne({
+      _id: doc.InstanceID
+    }, {
+      $set: {
+        status: 1
+      }
+    }, {
+      upsert: true
+    })
+    //const Cards = [];
+    //await processRootCard(doc, Cards);
+    //await saveCardDocs(Cards);
   })
+  console.log('Finish')
   process.exit(0);
 })
