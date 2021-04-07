@@ -64,9 +64,19 @@ async function start() {
     { $match: { fileDoc: { $size: 0 } } }
   ]);
 
+  let missingCnt = 0;
   for await (let card of cardsCursor) {
     console.log(`bad card ${card._id} BinaryID:${card.binaryFileInfo.BinaryID}`)
     const ff=(await sqlRows(`select * from dvdb.dbo.dvsys_binaries WITH (NOLOCK) where ID = @ID`, card.binaryFileInfo.BinaryID))[0];
+    if (!ff) {
+      missingCnt++;
+      await mdb.collection('dvCards').updateOne({_id: card._id}, {
+        $set:{
+          missingFile: true
+        }
+      });
+      continue;
+    }
     const binId = ff.ID;
     const bindata = ff.Data || ff.StreamData;
     if (card.binaryFileInfo.size !== bindata.length) {
@@ -82,6 +92,7 @@ async function start() {
       e.code !== 11000 && console.log('Err', e)
     }
   }
+  console.log('total missingFile', missingCnt)
 }
 
 start().then(() => {
