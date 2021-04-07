@@ -67,6 +67,12 @@ async function start() {
   let missingCnt = 0;
   for await (let card of cardsCursor) {
     console.log(`bad card ${card._id} BinaryID:${card.binaryFileInfo.BinaryID}`)
+    let docExt = await mdb.collection('dvFiles.files').findOne({ _id: card.binaryFileInfo.BinaryID }, {
+      projection: { _id:1 }
+    })
+    if (docExt) {
+      continue;
+    }
     const ff=(await sqlRows(`select * from dvdb.dbo.dvsys_binaries WITH (NOLOCK) where ID = @ID`, card.binaryFileInfo.BinaryID))[0];
     if (!ff) {
       missingCnt++;
