@@ -321,10 +321,10 @@ module.exports = async function() {
 
       const ff=(await sqlRows(`select * from dvdb.dbo.dvsys_binaries WITH (NOLOCK) where ID = @ID`, child.binaryFileInfo.BinaryID))[0];
       const binId = ff.ID;
-      //delete ff.ID;
       const bindata = ff.Data || ff.StreamData;
-      //delete ff.Data;
-      //delete ff.StreamData;
+
+      child.binaryFileInfo.size = bindata.length;
+
       try {
         await asyncEndStream(bucket.openUploadStreamWithId(binId, child.binaryFileInfo.Name, {
           metadata: child.binaryFileInfo
