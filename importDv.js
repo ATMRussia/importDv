@@ -47,7 +47,6 @@ module.exports = async function() {
   const dbConnector=new MinimalMongodb(settings.dstDb);
   const mdb=await dbConnector.connect();
   console.log(`MongoDb connected db:${settings.dstDb.db}`)
-  const dvCardsCollection = mdb.collection('dvCards')
 
   const bucket = new MongoDb.GridFSBucket(mdb, {
     bucketName: 'dvFiles'
@@ -367,7 +366,9 @@ module.exports = async function() {
 
   async function saveCardDocs(CardDocs){
     try{
-      await dvCardsCollection.insertMany(CardDocs);
+      await mdb.collection('dvCards').insertMany(CardDocs.filter(a => a.ParentID === '00000000-0000-0000-0000-000000000000' ));
+      await mdb.collection('dvChildCards').insertMany(CardDocs.filter( a => a.ParentID !== '00000000-0000-0000-0000-000000000000' ));
+
       console.log(`dvCards inserted cnt:${CardDocs.length}`);
     }catch(e){
       if (e.code !== 11000) {
@@ -377,7 +378,7 @@ module.exports = async function() {
       while(CardDocs.length) {
         let doc = CardDocs.shift();
         updCnt++;
-        await dvCardsCollection.updateOne({
+        await mdb.collection(`dv${doc.ParentID === '00000000-0000-0000-0000-000000000000' ? '' : 'Childs'}Cards`)..updateOne({
           _id: doc._id
         }, {
           $set: doc
@@ -390,7 +391,6 @@ module.exports = async function() {
       //await dvCardsCollection.insertMany(CardDocs);
     }
   }
-  await dvCardsCollection.createIndex({ 'ParentID':1 });
   await dvCardsCollection.createIndex({ 'CreationDateTime':1 });
 
   async function processRootCard(doc, CardDocs) {
@@ -418,7 +418,6 @@ module.exports = async function() {
       console.log('dvCardsQueued empty. Quit.')
       return 0;
     }
-
 
     const ssql = `select TOP 1 dvDates.CreationDateTime, dvCards.ParentRowID as FolderRowId, instanceTbl.*\
     from dvdb.dbo.[dvtable_{EB1D77DD-45BD-4A5E-82A7-A0E3B1EB1D74}] dvCards WITH (NOLOCK)\

@@ -51,9 +51,11 @@ async function start() {
   });
 
   const cardsCursor = mdb.collection('dvCards').aggregate([
-    { $project: { binaryFileInfo:1 } },
     {
-      $match: { 'binaryFileInfo.BinaryID': { $ne: null } }
+      $match: {
+        'binaryFileInfo.BinaryID': { $ne: null },
+        //missingFile: true
+      }
     },
     { $lookup: {
       from: 'dvFiles.files',
@@ -61,7 +63,8 @@ async function start() {
       foreignField: '_id',
       as: 'fileDoc'
     } },
-    { $match: { fileDoc: { $size: 0 } } }
+    { $match: { fileDoc: { $size: 0 } } },
+    { $project: { binaryFileInfo:1 } }
   ]);
 
   let missingCnt = 0;
